@@ -95,5 +95,6 @@ parsePageType s =
        "html"         -> (HTML,False)
        "latex"        -> (LaTeX,False)
        "latex+lhs"    -> (LaTeX,True)
+       "asciidoc"     -> (AsciiDoc,False)
        x              -> error $ "Unknown page type: " ++ x
 

@@ -14,7 +14,7 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111 - 1307  USA
 -}
 
 {- Functions for content conversion.
@@ -69,29 +69,76 @@ module Network.Gitit.ContentTransformer
 where
 
 import Prelude hiding (catch)
+import System.IO
+import System.Exit
+import System.Process
+import Control.Concurrent
+import Control.Concurrent.MVar
 import Network.Gitit.Server
 import Network.Gitit.Framework
 import Network.Gitit.State
-import Network.Gitit.Types
+import Network.Gitit.Types as Types
 import Network.Gitit.Layout
 import Network.Gitit.Export (exportFormats)
 import Network.Gitit.Page (stringToPage)
 import Network.Gitit.Cache (lookupCache, cacheContents)
 import qualified Data.FileStore as FS
 import Data.Maybe (mapMaybe)
-import Text.Pandoc hiding (MathML)
-import qualified Text.Pandoc as Pandoc
-import Text.Pandoc.Shared (ObfuscationMethod(..))
+import Text.Pandoc as Pandoc
+import Text.Pandoc.Shared (HTMLMathMethod(..), ObfuscationMethod(..))
+import Text.Pandoc.Readers.Asciidoc
 import Text.XHtml hiding ( (</>), dir, method, password, rev )
 import Text.Highlighting.Kate
 import Data.Maybe (isNothing)
+import Codec.Binary.UTF8.String (encodeString)
 import System.FilePath
 import Control.Monad.State
 import Control.Exception (throwIO, catch)
+import qualified Control.Exception as C
+import Network.URI (isAllowedInURI, escapeURIString)
 import qualified Data.ByteString as S (concat) 
 import qualified Data.ByteString.Lazy as L (toChunks, fromChunks)
 import Network.URL (encString)
 import Network.URI (isUnescapedInURI)
+import Text.XML.Light
+import Text.TeXMath
+
+readProcessInDir
+    :: String                   -- ^ Working dir
+    -> String                   -- ^ command to run
+    -> [String]                 -- ^ any arguments
+    -> String                   -- ^ standard input
+    -> IO (ExitCode,String,String) -- ^ exitcode, stdout, stderr
+readProcessInDir dir cmd args input = do
+    (Just inh, Just outh, Just errh, pid) <-
+        createProcess (proc cmd args){ std_in  = CreatePipe,
+                                       std_out = CreatePipe,
+                                       std_err = CreatePipe,
+                                       cwd = Just dir}
+
+    outMVar <- newEmptyMVar
+
+    -- fork off a thread to start consuming stdout
+    out  <- hGetContents outh
+    forkIO $ C.evaluate (length out) >> putMVar outMVar ()
+
+    -- fork off a thread to start consuming stderr
+    err  <- hGetContents errh
+    forkIO $ C.evaluate (length err) >> putMVar outMVar ()
+
+    -- now write and flush any input
+    when (not (null input)) $ do hPutStr inh input; hFlush inh
+    hClose inh -- done with stdin
+
+    -- wait on the output
+    takeMVar outMVar
+    takeMVar outMVar
+    hClose outh
+
+    -- wait on the process
+    ex <- waitForProcess pid
+
+    return (ex, out, err)
 
 --
 -- ContentTransformer runners
@@ -321,7 +368,9 @@ pageToPandoc page' = do
   modifyContext $ \ctx -> ctx{ ctxTOC = pageTOC page'
                              , ctxCategories = pageCategories page'
                              , ctxMeta = pageMeta page' }
-  return $ readerFor (pageFormat page') (pageLHS page') (pageText page')
+  let format = pageFormat page'
+      text = pageText page'
+  return $ readerFor format (pageLHS page') text
 
 -- | Converts contents of page file to Page object.
 contentsToPage :: String -> ContentTransformer Page
@@ -342,7 +391,7 @@ pandocToHtml pandocContents = do
                       , writerTemplate = "$if(toc)$\n$toc$\n$endif$\n$body$"
                       , writerHTMLMathMethod =
                             case mathMethod cfg of
-                                 MathML -> Pandoc.MathML Nothing
+                                 Types.MathML -> Pandoc.MathML Nothing
                                  _      -> JsMath (Just $ base' ++
                                                       "/js/jsMath/easy/load.js")
                       , writerTableOfContents = toc
@@ -431,13 +480,47 @@ wikiDivify c = do
                           else thediv ! [identifier "categoryList"] << ulist << map categoryLink categories
   return $ thediv ! [identifier "wikipage"] << [c, htmlCategories]
 
+cmap f lst = concat $ map f lst
+
+showInline = cmap showInline1
+showInline1 (Str s)      = s
+showInline1 (Emph lst)   = cmap showInline1 lst
+showInline1 (Strong lst) = cmap showInline1 lst
+showInline1 (Strikeout lst) = cmap showInline1 lst
+showInline1 (Superscript lst) = cmap showInline1 lst
+showInline1 (Subscript lst) = cmap showInline1 lst
+showInline1 (SmallCaps lst) = cmap showInline1 lst
+showInline1 (Quoted _ lst) = "\"" ++ cmap showInline1 lst ++ "\""
+showInline1 (Cite _ lst) = cmap showInline1 lst
+showInline1 (Code s) = s
+showInline1 (Math _ s) = s
+showInline1 (TeX s) = s
+showInline1 (HtmlInline s) = s
+showInline1 (Link lst _) = cmap showInline1 lst
+showInline1 (Image lst _) = cmap showInline1 lst
+showInline1 (Note _) = "<note>"
+showInline1 Space = " "
+showInline1 EmDash = "—"
+showInline1 EnDash = "-"
+showInline1 Apostrophe = "'"
+showInline1 Ellipses = "…"
+showInline1 LineBreak = "\n"
+
+pandocTitle (Pandoc meta _) = getTitle meta
+  where
+    getTitle (Meta lst _ _) = showInline lst
+
 -- | Adds page title to a Pandoc document.
 addPageTitleToPandoc :: String -> Pandoc -> ContentTransformer Pandoc
-addPageTitleToPandoc title' (Pandoc _ blocks) = do
-  updateLayout $ \layout -> layout{ pgTitle = title' }
-  return $ if null title'
+addPageTitleToPandoc newTitle pandoc@(Pandoc _ blocks) = do
+  let wasTitle = pandocTitle pandoc
+      title = if null wasTitle
+                then newTitle
+                else wasTitle
+  updateLayout $ \layout -> layout{ pgTitle = title }
+  return $ if null title
               then Pandoc (Meta [] [] []) blocks
-              else Pandoc (Meta [Str title'] [] []) blocks
+              else Pandoc (Meta [Str title] [] []) blocks
 
 -- | Adds javascript links for math support.
 addMathSupport :: a -> ContentTransformer a
@@ -446,7 +529,7 @@ addMathSupport c = do
   updateLayout $ \l ->
     case mathMethod conf of
          JsMathScript -> addScripts l ["jsMath/easy/load.js"]
-         MathML       -> addScripts l ["MathMLinHTML.js"]
+         Types.MathML       -> addScripts l ["MathMLinHTML.js"]
          RawTeX       -> l
   return c
 
@@ -485,6 +568,10 @@ updateLayout f = do
 -- Pandoc and wiki content conversion support
 --
 
+defaultPS lhs = defaultParserState{ stateSanitizeHTML = True
+                                  , stateSmart = True
+                                  , stateLiterateHaskell = lhs }
+
 readerFor :: PageType -> Bool -> (String -> Pandoc)
 readerFor pt lhs =
   let defPS = defaultParserState{ stateSanitizeHTML = True
@@ -495,6 +582,7 @@ readerFor pt lhs =
        Markdown -> readMarkdown defPS
        LaTeX    -> readLaTeX defPS
        HTML     -> readHtml defPS
+       AsciiDoc -> readAsciidoc defPS
 
 wikiLinksTransform :: Pandoc -> PluginM Pandoc
 wikiLinksTransform = return . processWith convertWikiLinks
@@ -504,6 +592,27 @@ convertWikiLinks :: Inline -> Inline
 convertWikiLinks (Link ref ("", "")) =
   Link ref (inlinesToURL ref, "Go to wiki page")
 convertWikiLinks x = x
+
+mathMLTransform :: String -> Pandoc -> PluginM Pandoc
+mathMLTransform format inp | format `elem` ["","S5"] = do
+  let (Pandoc m blks, mathUsed) = runState (processWithM convertTeXMathToMathML inp) False
+  let scriptLink = RawHtml "<script type=\"text/javascript\" src=\"/js/MathMLinHTML.js\"></script>"
+  let blks' = if mathUsed
+                 then blks ++ [scriptLink]
+                 else blks
+  return $ Pandoc m blks'
+mathMLTransform _ inp = return inp
+
+-- | Convert math to MathML.  We put this in a Writer monad
+-- to keep track of whether we've actually got any MathML; if not,
+-- we can avoid linking a script.
+convertTeXMathToMathML :: Inline -> State Bool Inline
+convertTeXMathToMathML (Math t x) = do
+  case texMathToMathML t' x of
+       Left _  -> return $ Math t x
+       Right v -> put True >> return (HtmlInline $ ppElement v)
+    where t' = if t == DisplayMath then DisplayBlock else DisplayInline
+convertTeXMathToMathML x = return x
 
 -- | Derives a URL from a list of Pandoc Inline elements.
 inlinesToURL :: [Inline] -> String

@@ -490,8 +490,8 @@ editPage = withData $ \(params :: Params) -> do
             -- saved version (because we're doing a revert and
             -- we don't want gitit to merge the changes with the
             -- latest version)
-            r <- liftIO $ latest fs (pathForPage page) >>= revision fs
-            return (Just $ revId r, c))
+            r <- liftIO $ latest fs (pathForPage page) -- >>= revision fs
+            return (Just r, c))
         (\e -> if e == NotFound
                   then return (Nothing, "")
                   else throwIO e)

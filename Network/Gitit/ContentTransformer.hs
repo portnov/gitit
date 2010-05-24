@@ -480,35 +480,9 @@ wikiDivify c = do
                           else thediv ! [identifier "categoryList"] << ulist << map categoryLink categories
   return $ thediv ! [identifier "wikipage"] << [c, htmlCategories]
 
-showInline = concatMap showInline1
-showInline1 (Str s)      = s
-showInline1 (Emph lst)   = showInline lst
-showInline1 (Strong lst) = showInline lst
-showInline1 (Strikeout lst) = showInline lst
-showInline1 (Superscript lst) = showInline lst
-showInline1 (Subscript lst) = showInline lst
-showInline1 (SmallCaps lst) = showInline lst
-showInline1 (Quoted _ lst) = "\"" ++ showInline lst ++ "\""
-showInline1 (Cite _ lst) = showInline lst
-showInline1 (Code s) = s
-showInline1 (Math _ s) = s
-showInline1 (TeX s) = s
-showInline1 (HtmlInline s) = s
-showInline1 (Link lst _) = showInline lst
-showInline1 (Image lst _) = showInline lst
-showInline1 (Note _) = "<note>"
-showInline1 Space = " "
-showInline1 EmDash = "—"
-showInline1 EnDash = "-"
-showInline1 Apostrophe = "'"
-showInline1 Ellipses = "…"
-showInline1 LineBreak = "\n"
-showInline1 (Anchor _ lst) = showInline lst
-showInline1 (InternalLink lst _) = showInline lst
-
 pandocTitle (Pandoc meta _) = getTitle meta
   where
-    getTitle (Meta lst _ _) = showInline lst
+    getTitle (Meta lst _ _) = inlinesToString lst
 
 -- | Adds page title to a Pandoc document.
 addPageTitleToPandoc :: String -> Pandoc -> ContentTransformer Pandoc
@@ -646,4 +620,6 @@ inlinesToString = concatMap go
                Link xs _               -> concatMap go xs
                Image xs _              -> concatMap go xs
                Note _                  -> ""
+               Anchor _ xs             -> concatMap go xs
+               InternalLink xs _       -> concatMap go xs
 

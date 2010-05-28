@@ -57,7 +57,7 @@ import Data.Maybe (fromMaybe)
 
 parseMetadata :: String -> ([(String, String)], String)
 parseMetadata raw =
-  case parse pMetadataBlock "" raw of
+  case parse (pAsciidocVarsBlock <|> pMetadataBlock) "" raw of
     Left _           -> ([], raw)
     Right (ls, rest) -> (ls, rest)
 
@@ -71,6 +71,21 @@ pMetadataBlock = try $ do
   skipMany pBlankline
   rest <- getInput
   return (ls, rest)
+
+pAsciidocVarsBlock :: GenParser Char st ([(String, String)], String)
+pAsciidocVarsBlock = try $ do
+    pairs <- many1 pair
+    skipMany pBlankline
+    rest <- getInput
+    return (pairs, rest)
+  where
+    pair = do
+      char ':'
+      name <- many1 letter
+      char ':'
+      many1 $ oneOf " \t"
+      value <- many1 $ noneOf "\n\r"
+      return (name, value)
 
 pBlankline :: GenParser Char st Char
 pBlankline = try $ many (oneOf " \t") >> newline
@@ -140,7 +155,7 @@ pageToString conf page' =
   in  metadata' ++ (if null metadata' then "" else "\n") ++ pageText page'
 
 extractCategories :: String -> [String]
-extractCategories s | take 3 s == "---" = 
+extractCategories s | (take 3 s == "---") || (take 1 s == ":") = 
   let (md,_) = parseMetadata s
   in  splitCategories $ fromMaybe "" $ lookup "categories" md
 extractCategories _ = []

@@ -93,3 +93,11 @@ loadUsers path = do
       let users = getObjList lst
       return $ map yamlToUser users
 
+saveUsers :: FilePath -> (M.Map String User) -> IO ()
+saveUsers path users = do
+  let users' = map snd $ M.assocs users
+      ys = map userToYaml users'
+      y = Sequence ys
+      str = encode y
+  BS.writeFile path str
+

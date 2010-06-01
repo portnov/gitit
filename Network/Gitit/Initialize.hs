@@ -32,6 +32,7 @@ import Network.Gitit.Types
 import Network.Gitit.State
 import Network.Gitit.Framework
 import Network.Gitit.Plugins
+import Network.Gitit.Users
 import Network.Gitit.Layout (defaultRenderPage)
 import Paths_gitit (getDataFileName)
 import Control.Exception (throwIO, try)
@@ -50,7 +51,7 @@ initializeGititState conf = do
 
   userFileExists <- doesFileExist userFile'
   users' <- if userFileExists
-               then liftM (M.fromList . read) $ readFileUTF8 userFile'
+               then loadUsers userFile'
                else return M.empty
 
   templ <- compilePageTemplate (templatesDir conf)

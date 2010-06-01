@@ -33,6 +33,7 @@ import Data.FileStore
 import Data.List (intercalate)
 import System.Log.Logger (Priority(..), logM)
 import Network.Gitit.Types
+import Network.Gitit.Users
 
 gititstate :: IORef GititState
 gititstate = unsafePerformIO $  newIORef  GititState { sessions = undefined
@@ -101,8 +102,7 @@ delUser uname =
 writeUserFile :: Config -> IO ()
 writeUserFile conf = do
   usrs <- queryGititState users
-  C.writeFile (userFile conf) $
-      "[" ++ intercalate "\n," (map show $ M.toList usrs) ++ "\n]"
+  saveUsers (userFile conf) usrs
 
 getUser :: String -> GititServerPart (Maybe User)
 getUser uname = liftM (M.lookup uname) $ queryGititState users

@@ -165,7 +165,8 @@ data Password = Password { pSalt :: String, pHashed :: String }
 data User = User {
   uUsername :: String,
   uPassword :: Password,
-  uEmail    :: String
+  uEmail    :: String,
+  uGroups   :: [String]
 } deriving (Show,Read)
 
 -- | Common state for all gitit wikis in an application.

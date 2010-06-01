@@ -95,12 +95,12 @@ Library
   other-modules:     Network.Gitit.Cache, Network.Gitit.State,
                      Paths_gitit, Network.Gitit.Server, Network.Gitit.Export,
                      Network.Gitit.Util, Network.Gitit.Handlers, Network.Gitit.Plugins,
-                     Network.Gitit.Authentication, Network.Gitit.Page, Network.Gitit.Feed
+                     Network.Gitit.Authentication, Network.Gitit.Page, Network.Gitit.Feed, Network.Gitit.Users
   if flag(plugins)
     exposed-modules: Network.Gitit.Interface
     build-depends:   ghc, ghc-paths
     cpp-options:     -D_PLUGINS
-  build-depends:     base >= 3, pandoc >= 1.5.0.1, filepath, safe
+  build-depends:     base >= 3, pandoc >= 1.5.0.1, filepath, safe, data-object-yaml, yaml, data-object
   extensions:        CPP
   if impl(ghc >= 6.12)
     ghc-options:     -Wall -fno-warn-unused-do-bind

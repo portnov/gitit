@@ -130,7 +130,7 @@ getLoggedInUser = do
           mbUser <- getUser u
           case mbUser of
                Just user -> return $ Just user
-               Nothing   -> return $ Just User{uUsername = u, uEmail = "", uPassword = undefined}
+               Nothing   -> return $ Just User{uUsername = u, uEmail = "", uPassword = undefined, uGroups = []}
 
 pAuthorizationHeader :: GenParser Char st String
 pAuthorizationHeader = try pBasicHeader <|> pDigestHeader

@@ -60,7 +60,8 @@ mkUser uname email pass = do
   return  User { uUsername = uname,
                  uPassword = Password { pSalt = salt,
                                         pHashed = hashPassword salt pass },
-                 uEmail = email }
+                 uEmail = email,
+                 uGroups = [] }
 
 genSalt :: IO String
 genSalt = replicateM 32 $ randomRIO ('0','z')

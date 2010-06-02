@@ -590,7 +590,7 @@ confirmDelete = do
 deletePage :: Handler
 deletePage = withData $ \(params :: Params) -> do
   page <- getPage
-  whenUserHasPermission DeleteP (pathForPage page) $ do
+  whenUserHasPermission DeleteP (dirname $ pathForPage page) $ do
       let file = pFileToDelete params
       mbUser <- getLoggedInUser
       (user, email) <- case mbUser of

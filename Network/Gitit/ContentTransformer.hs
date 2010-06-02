@@ -87,7 +87,6 @@ import qualified Data.FileStore as FS
 import Data.Maybe (mapMaybe)
 import Text.Pandoc as Pandoc
 import Text.Pandoc.Shared (HTMLMathMethod(..), ObfuscationMethod(..))
-import Text.Pandoc.Readers.Asciidoc
 import Text.XHtml hiding ( (</>), dir, method, password, rev )
 import Text.Highlighting.Kate
 import Data.Maybe (isNothing)
@@ -548,10 +547,6 @@ updateLayout f = do
 --
 -- Pandoc and wiki content conversion support
 --
-
-defaultPS lhs = defaultParserState{ stateSanitizeHTML = True
-                                  , stateSmart = True
-                                  , stateLiterateHaskell = lhs }
 
 readerFor :: PageType -> Bool -> (String -> Pandoc)
 readerFor pt lhs =

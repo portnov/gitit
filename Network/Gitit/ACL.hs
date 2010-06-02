@@ -2,12 +2,13 @@
 
 module Network.Gitit.ACL where
 
-import Data.Maybe
 import Data.List
 import Data.Object
 import Data.Object.Yaml
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.Map as M
+import System.FilePath ((</>))
+
+import Network.Gitit.Yaml
 
 type Objects = [GititObject]
 data GititObject = GPage String | GDirectory String | AllPages
@@ -24,8 +25,15 @@ instance IsYamlScalar GititObject where
   toYamlScalar AllPages = toYamlScalar "all"
 
   fromYamlScalar s@(last . fromYamlScalar -> '/') = GDirectory (init $ fromYamlScalar s)
-  fromYamlScalar s@(fromYamlScalar -> "all") = AllPages
+  fromYamlScalar (fromYamlScalar -> "all") = AllPages
   fromYamlScalar s = GPage (fromYamlScalar s)
+
+(<#>) :: GititObject -> GititObject -> GititObject 
+(GPage p) <#> _ = GPage p
+(GDirectory d1) <#> (GDirectory d2) = GDirectory (d1 </> d2)
+(GDirectory d) <#> (GPage p) = GPage (d </> p)
+(GDirectory d) <#> AllPages = GDirectory d
+AllPages <#> x = x
 
 type Subjects = [Subject]
 data Subject = UserS String | GroupS String | AllUsers
@@ -42,7 +50,7 @@ instance IsYamlScalar Subject where
   toYamlScalar AllUsers = toYamlScalar "all"
 
   fromYamlScalar s@(last . fromYamlScalar -> '@') = GroupS (init $ fromYamlScalar s)
-  fromYamlScalar s@(fromYamlScalar -> "all") = AllUsers 
+  fromYamlScalar (fromYamlScalar -> "all") = AllUsers 
   fromYamlScalar s = UserS (fromYamlScalar s)
   
 data PermitSpec = 
@@ -88,54 +96,18 @@ data Rule =
   | Rule Objects Subjects [Rule]
   deriving (Eq,Show)
 
-string :: (IsYamlScalar s) => s -> YamlObject
-string str = Scalar (toYamlScalar str)
+data LinearRule = 
+  LR {
+    objects :: Objects,
+    subjects :: Subjects,
+    permitOp :: PermitOp,
+    permissions :: Permissions }
+  deriving (Eq)
 
-getSubKey :: (IsYamlScalar a) => BS.ByteString -> BS.ByteString -> YamlObject -> Maybe a
-getSubKey key subkey obj = do
-  attr <- getAttr key obj
-  r <- getAttr subkey attr
-  getScalar r
+type ACL = [LinearRule]
 
-getSubObj :: BS.ByteString -> BS.ByteString -> YamlObject -> Maybe YamlObject
-getSubObj key subkey obj = do
-  attr <- getAttr key obj
-  getAttr subkey attr
-
-getAttr :: BS.ByteString -> YamlObject -> Maybe YamlObject
-getAttr key (Mapping pairs) = lookup (toYamlScalar key) pairs
-getAttr key (Sequence lst) =
-  case catMaybes $ map (getAttr key) lst of
-    [x] -> Just x
-    _   -> Nothing
-getAttr key (Scalar sc) = Nothing
-
-getName :: YamlObject -> String
-getName (Mapping ((n,_):_)) = fromYamlScalar n
-getName _                   = "user"
-
-getString :: YamlObject -> String
-getString (Scalar x) = fromYamlScalar x
-getString _          = ""
-
-getScalar :: (IsYamlScalar a) => YamlObject -> Maybe a 
-getScalar (Scalar x) = Just (fromYamlScalar x)
-getScalar _          = Nothing
-
-getList :: YamlObject -> [String]
-getList (Sequence lst) = map getString lst
-getList _              = []
-
-getObjList :: YamlObject -> [YamlObject]
-getObjList (Sequence lst) = lst
-getObjList _              = []
-
-getListAttr :: (IsYamlScalar s) => BS.ByteString -> YamlObject -> [s]
-getListAttr key y = 
-  case getAttr key y of
-    Nothing -> []
-    Just (Scalar x) -> [fromYamlScalar x]
-    Just (Sequence lst) -> catMaybes $ map getScalar lst
+instance Show LinearRule where
+  show (LR os ss po ps) = show os ++ ", " ++ show ss ++ ": " ++ show po ++ " " ++ show ps
 
 rulesToYaml :: [Rule] -> YamlObject
 rulesToYaml rules = Sequence (map ruleToYaml rules)
@@ -180,6 +152,9 @@ ruleToYaml (Rule objs [] rules) = Mapping [(toYamlScalar "objects", objsList obj
                                            (toYamlScalar "rules",   rulesToYaml rules)]
 ruleToYaml (Rule [] subjs rules) = Mapping [(toYamlScalar "subjects", subjsList subjs),
                                             (toYamlScalar "rules",    rulesToYaml rules)]
+ruleToYaml (Rule objs subjs rules) = Mapping [(toYamlScalar "objects",  objsList objs),
+                                              (toYamlScalar "subjects", subjsList subjs),
+                                              (toYamlScalar "rules",    rulesToYaml rules)]
 
 yamlToRules :: YamlObject -> [Rule]
 yamlToRules (Sequence ys) = map yamlToRule ys
@@ -218,3 +193,26 @@ getPermissions y =
     readPermission "create" = CreateP
     readPermission "delete" = DeleteP
     readPermission x = error $ "Unknown permission: " ++ x
+
+linearize :: [Rule] -> ACL
+linearize = concatMap linearize'
+
+linearize' :: Rule -> ACL
+linearize' (SimpleRule os ss (PermitSpec po ps)) = [LR os ss po ps]
+linearize' (Rule os ss rules) = (LR os ss SetPermissions (Permissions [])) `composeACL` rules
+
+composeACL :: LinearRule -> [Rule] -> ACL
+composeACL lr ps = concatMap (compose' lr) ps
+  where
+    compose' :: LinearRule -> Rule -> [LinearRule]
+    compose' (LR los lss _ lps) (SimpleRule sos sss (PermitSpec spo sps)) =
+        [LR (composeObjects los sos) (lss ++ sss) spo (composePermissions lps sps)]
+    compose' (LR los lss _ lps) (Rule os ss rules) = 
+        (LR (composeObjects los os) (lss ++ ss) SetPermissions lps) `composeACL` rules
+
+    composeObjects os [] = os
+    composeObjects [] os = os
+    composeObjects os1 os2 = 
+        [o1 <#> o2 | o1 <- os1, o2 <- os2]
+
+    composePermissions (Permissions p1) (Permissions p2) = Permissions (nub $ sort $ p1 ++ p2)

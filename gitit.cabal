@@ -95,7 +95,8 @@ Library
   other-modules:     Network.Gitit.Cache, Network.Gitit.State,
                      Paths_gitit, Network.Gitit.Server, Network.Gitit.Export,
                      Network.Gitit.Util, Network.Gitit.Handlers, Network.Gitit.Plugins,
-                     Network.Gitit.Authentication, Network.Gitit.Page, Network.Gitit.Feed, Network.Gitit.Users
+                     Network.Gitit.Authentication, Network.Gitit.Page, Network.Gitit.Feed, Network.Gitit.Users,
+                     Network.Gitit.Yaml, Network.Gitit.ACL
   if flag(plugins)
     exposed-modules: Network.Gitit.Interface
     build-depends:   ghc, ghc-paths

@@ -75,6 +75,7 @@ import System.Process
 import Control.Concurrent
 import Control.Concurrent.MVar
 import Network.Gitit.Server
+import Network.Gitit.ACL
 import Network.Gitit.Framework
 import Network.Gitit.State
 import Network.Gitit.Types as Types
@@ -185,7 +186,10 @@ runFileTransformer = runTransformer id
 
 -- | Responds with raw page source.
 showRawPage :: Handler
-showRawPage = runPageTransformer rawTextResponse
+showRawPage = do
+  page <- getPage
+  whenUserHasPermission ReadP (pathForPage page) $
+      runPageTransformer rawTextResponse
 
 -- | Responds with raw source (for non-pages such as source
 -- code files).
@@ -194,7 +198,10 @@ showFileAsText = runFileTransformer rawTextResponse
 
 -- | Responds with rendered wiki page.
 showPage :: Handler
-showPage = runPageTransformer htmlViaPandoc
+showPage = do
+  page <- getPage
+  whenUserHasPermission ReadP (pathForPage page) $
+      runPageTransformer htmlViaPandoc
 
 -- | Responds with page exported into selected format.
 exportPage :: Handler 

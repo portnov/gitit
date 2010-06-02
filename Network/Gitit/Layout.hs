@@ -25,12 +25,15 @@ module Network.Gitit.Layout ( defaultPageLayout
                             , formattedPage
                             , filledPageTemplate
                             , uploadsAllowed
+                            , whenUserHasPermission
+                            , errorMessage 
                             )
 where
 import Network.Gitit.Server
 import Network.Gitit.Framework
 import Network.Gitit.State
 import Network.Gitit.Types
+import Network.Gitit.ACL
 import Network.Gitit.Export (exportFormats)
 import Network.HTTP (urlEncodeVars)
 import qualified Text.StringTemplate as T
@@ -110,6 +113,20 @@ filledPageTemplate base' cfg layout htmlContents templ =
                    templ
 
 
+errorMessage :: String -> String -> Handler
+errorMessage title message =
+   formattedPage defaultPageLayout{
+                   pgPageName = ""
+                 , pgTabs = []
+                 , pgTitle = title
+                 } $ p << [ stringToHtml message ]
+
+whenUserHasPermission :: Permission -> String -> Handler -> Handler
+whenUserHasPermission perm path action = do
+  b <- checkUserPermission path perm
+  if b
+    then action
+    else errorMessage "Access denied" ("You have no " ++ show perm ++ " permission for this page.")
 
 exportBox :: String -> Config -> String -> Maybe String -> Html
 exportBox base' cfg page rev | not (isSourceCode page) =

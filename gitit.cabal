@@ -91,12 +91,11 @@ Library
   exposed-modules:   Network.Gitit, Network.Gitit.ContentTransformer,
                      Network.Gitit.Types, Network.Gitit.Framework,
                      Network.Gitit.Initialize, Network.Gitit.Config,
-                     Network.Gitit.Layout
+                     Network.Gitit.Layout, Network.Gitit.Users, Network.Gitit.Yaml, Network.Gitit.ACL
   other-modules:     Network.Gitit.Cache, Network.Gitit.State,
                      Paths_gitit, Network.Gitit.Server, Network.Gitit.Export,
                      Network.Gitit.Util, Network.Gitit.Handlers, Network.Gitit.Plugins,
-                     Network.Gitit.Authentication, Network.Gitit.Page, Network.Gitit.Feed, Network.Gitit.Users,
-                     Network.Gitit.Yaml, Network.Gitit.ACL
+                     Network.Gitit.Authentication, Network.Gitit.Page, Network.Gitit.Feed
   if flag(plugins)
     exposed-modules: Network.Gitit.Interface
     build-depends:   ghc, ghc-paths

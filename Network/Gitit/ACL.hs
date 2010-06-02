@@ -216,3 +216,39 @@ composeACL lr ps = concatMap (compose' lr) ps
         [o1 <#> o2 | o1 <- os1, o2 <- os2]
 
     composePermissions (Permissions p1) (Permissions p2) = Permissions (nub $ sort $ p1 ++ p2)
+
+parseACL :: String -> ACL
+parseACL text =
+  case decode (BS.pack text) of
+    Nothing -> []
+    Just y -> linearize $ yamlToRules y
+
+doesUserHavePermission :: ACL -> String -> [String] -> String -> Permission -> Bool
+doesUserHavePermission acl userName groups path perm =
+  perm `elem` calculatePermissions acl userName groups path
+
+calculatePermissions :: ACL -> String -> [String] -> String -> [Permission]
+calculatePermissions acl userName groups path = go [] acl
+  where
+    go perms [] = perms
+    go perms ((LR objs subjs op (Permissions ps)): other) =
+      let sm = subjMatches userName groups subjs 
+          om = objMatches path objs
+      in if om && sm
+           then go (permOp op perms ps) other
+           else go perms other
+
+    permOp SetPermissions = union
+    permOp UnsetPermissions = (\\)
+
+subjMatches :: String -> [String] -> Subjects -> Bool
+subjMatches _ _ [] = False
+subjMatches userName groups ((UserS u): other) = (userName == u) || subjMatches userName groups other
+subjMatches userName groups ((GroupS g): other) = (g `elem` groups) || subjMatches userName groups other
+subjMatches _ _ (AllUsers: _) = True
+
+objMatches :: String -> Objects -> Bool
+objMatches _ [] = False
+objMatches path ((GPage p): other) = (path == p) || objMatches path other
+objMatches path ((GDirectory d): other) = (d `isPrefixOf` path) || objMatches path other
+objMatches _ (AllPages: _) = True

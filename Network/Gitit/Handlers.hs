@@ -56,6 +56,7 @@ where
 import Safe
 import Data.FileStore.Utils (isInsideDir)
 import Network.Gitit.Server
+import Network.Gitit.ACL
 import Network.Gitit.Framework
 import Network.Gitit.Layout
 import Network.Gitit.Types
@@ -133,21 +134,25 @@ discussPage = do
   seeOther (base' ++ urlForPage (if isDiscussPage page then page else ('@':page))) $
                      toResponse "Redirecting to discussion page"
 
+dirname :: FilePath -> FilePath
+dirname x = takeDirectory x ++ "/"
+
 createPage :: Handler
 createPage = do
   page <- getPage
-  base' <- getWikiBase
-  case page of
-       ('_':_) -> mzero   -- don't allow creation of _index, etc.
-       _       -> formattedPage defaultPageLayout{
-                                      pgPageName = page
-                                    , pgTabs = []
-                                    , pgTitle = "Create " ++ page ++ "?"
-                                    } $
-                    p << [ stringToHtml ("There is no page '" ++ page ++
-                              "'.  You may create the page by "),
-                            anchor ! [href $ base' ++ "/_edit" ++ urlForPage page] <<
-                              "clicking here." ]
+  whenUserHasPermission CreateP (dirname $ pathForPage page) $ do
+        base' <- getWikiBase
+        case page of
+             ('_':_) -> mzero   -- don't allow creation of _index, etc.
+             _       -> formattedPage defaultPageLayout{
+                                            pgPageName = page
+                                          , pgTabs = []
+                                          , pgTitle = "Create " ++ page ++ "?"
+                                          } $
+                          p << [ stringToHtml ("There is no page '" ++ page ++
+                                    "'.  You may create the page by "),
+                                  anchor ! [href $ base' ++ "/_edit" ++ urlForPage page] <<
+                                    "clicking here." ]
 
 uploadForm :: Handler
 uploadForm = withData $ \(params :: Params) -> do
@@ -190,49 +195,51 @@ uploadFile = withData $ \(params :: Params) -> do
   (user, email) <- case mbUser of
                         Nothing -> fail "User must be logged in to delete page."
                         Just u  -> return (uUsername u, uEmail u)
-  let overwrite = pOverwrite params
-  fs <- getFileStore
-  exists <- liftIO $ catch (latest fs wikiname >> return True) $ \e ->
-                      if e == NotFound
-                         then return False
-                         else throwIO e >> return True
-  inStaticDir <- liftIO $
-                  (repositoryPath cfg </> wikiname) `isInsideDir` staticDir cfg
-  inTemplatesDir <- liftIO $
-                  (repositoryPath cfg </> wikiname) `isInsideDir` templatesDir cfg
-  let imageExtensions = [".png", ".jpg", ".gif"]
-  let errors = validate
-                 [ (null . filter (not . isSpace) $ logMsg,
-                    "Description cannot be empty.")
-                 , (null origPath, "File not found.")
-                 , (inStaticDir,  "Destination is inside static directory.")
-                 , (inTemplatesDir,  "Destination is inside templates directory.")
-                 , (not overwrite && exists, "A file named '" ++ wikiname ++
-                    "' already exists in the repository: choose a new name " ++
-                    "or check the box to overwrite the existing file.")
-                 , (B.length fileContents > fromIntegral (maxUploadSize cfg),
-                    "File exceeds maximum upload size.")
-                 , (isPageFile wikiname,
-                    "This file extension is reserved for wiki pages.")
-                 ]
-  if null errors
-     then do
-       expireCachedFile wikiname `mplus` return ()
-       liftIO $ save fs wikiname (Author user email) logMsg fileContents
-       let contents = thediv <<
-             [ h2 << ("Uploaded " ++ show (B.length fileContents) ++ " bytes")
-             , if takeExtension wikiname `elem` imageExtensions
-                  then p << "To add this image to a page, use:" +++
-                       pre << ("![alt text](/" ++ wikiname ++ ")")
-                  else p << "To link to this resource from a page, use:" +++
-                       pre << ("[link label](/" ++ wikiname ++ ")") ]
-       formattedPage defaultPageLayout{
-                       pgMessages = pMessages params,
-                       pgShowPageTools = False,
-                       pgTabs = [],
-                       pgTitle = "Upload successful"}
-                     contents
-     else withMessages errors uploadForm
+  
+  whenUserHasPermission CreateP wikiname $ do
+      let overwrite = pOverwrite params
+      fs <- getFileStore
+      exists <- liftIO $ catch (latest fs wikiname >> return True) $ \e ->
+                          if e == NotFound
+                             then return False
+                             else throwIO e >> return True
+      inStaticDir <- liftIO $
+                      (repositoryPath cfg </> wikiname) `isInsideDir` staticDir cfg
+      inTemplatesDir <- liftIO $
+                      (repositoryPath cfg </> wikiname) `isInsideDir` templatesDir cfg
+      let imageExtensions = [".png", ".jpg", ".gif"]
+      let errors = validate
+                     [ (null . filter (not . isSpace) $ logMsg,
+                        "Description cannot be empty.")
+                     , (null origPath, "File not found.")
+                     , (inStaticDir,  "Destination is inside static directory.")
+                     , (inTemplatesDir,  "Destination is inside templates directory.")
+                     , (not overwrite && exists, "A file named '" ++ wikiname ++
+                        "' already exists in the repository: choose a new name " ++
+                        "or check the box to overwrite the existing file.")
+                     , (B.length fileContents > fromIntegral (maxUploadSize cfg),
+                        "File exceeds maximum upload size.")
+                     , (isPageFile wikiname,
+                        "This file extension is reserved for wiki pages.")
+                     ]
+      if null errors
+         then do
+           expireCachedFile wikiname `mplus` return ()
+           liftIO $ save fs wikiname (Author user email) logMsg fileContents
+           let contents = thediv <<
+                 [ h2 << ("Uploaded " ++ show (B.length fileContents) ++ " bytes")
+                 , if takeExtension wikiname `elem` imageExtensions
+                      then p << "To add this image to a page, use:" +++
+                           pre << ("![alt text](/" ++ wikiname ++ ")")
+                      else p << "To link to this resource from a page, use:" +++
+                           pre << ("[link label](/" ++ wikiname ++ ")") ]
+           formattedPage defaultPageLayout{
+                           pgMessages = pMessages params,
+                           pgShowPageTools = False,
+                           pgTabs = [],
+                           pgTitle = "Upload successful"}
+                         contents
+         else withMessages errors uploadForm
 
 goToPage :: Handler
 goToPage = withData $ \(params :: Params) -> do
@@ -316,12 +323,14 @@ searchResults = withData $ \(params :: Params) -> do
 showPageHistory :: Handler
 showPageHistory = withData $ \(params :: Params) -> do
   page <- getPage
-  showHistory (pathForPage page) page params
+  whenUserHasPermission ReadP (pathForPage page) $
+      showHistory (pathForPage page) page params
 
 showFileHistory :: Handler
 showFileHistory = withData $ \(params :: Params) -> do
   file <- getPage
-  showHistory file file params
+  whenUserHasPermission ReadP file $
+      showHistory file file params
 
 showHistory :: String -> String -> Params -> Handler
 showHistory file page params =  do
@@ -425,12 +434,14 @@ showActivity = withData $ \(params :: Params) -> do
 showPageDiff :: Handler
 showPageDiff = withData $ \(params :: Params) -> do
   page <- getPage
-  showDiff (pathForPage page) page params
+  whenUserHasPermission ReadP (pathForPage page) $
+      showDiff (pathForPage page) page params
 
 showFileDiff :: Handler
 showFileDiff = withData $ \(params :: Params) -> do
   page <- getPage
-  showDiff page page params
+  whenUserHasPermission ReadP page $
+      showDiff page page params
 
 showDiff :: String -> String -> Params -> Handler
 showDiff file page params = do
@@ -484,66 +495,67 @@ editPage = withData $ \(params :: Params) -> do
   let rev = pRevision params  -- if this is set, we're doing a revert
   fs <- getFileStore
   page <- getPage
-  let getRevisionAndText = catch
-        (do c <- liftIO $ retrieve fs (pathForPage page) rev
-            -- even if pRevision is set, we return revId of latest
-            -- saved version (because we're doing a revert and
-            -- we don't want gitit to merge the changes with the
-            -- latest version)
-            r <- liftIO $ latest fs (pathForPage page) -- >>= revision fs
-            return (Just r, c))
-        (\e -> if e == NotFound
-                  then return (Nothing, "")
-                  else throwIO e)
-  (mbRev, raw) <- case pEditedText params of
-                         Nothing -> liftIO getRevisionAndText
-                         Just t  -> let r = if null (pSHA1 params)
-                                               then Nothing
-                                               else Just (pSHA1 params)
-                                    in return (r, t)
-  let messages = pMessages params
-  let logMsg = pLogMsg params
-  let sha1Box = case mbRev of
-                 Just r  -> textfield "sha1" ! [thestyle "display: none",
-                                                value r]
-                 Nothing -> noHtml
-  let readonly = if isJust (pRevision params)
-                    -- disable editing of text box if it's a revert
-                    then [strAttr "readonly" "yes",
-                          strAttr "style" "color: gray"]
-                    else []
-  base' <- getWikiBase
-  cfg <- getConfig
-  let editForm = gui (base' ++ urlForPage page) ! [identifier "editform"] <<
-                   [ sha1Box
-                   , textarea ! (readonly ++ [cols "80", name "editedText",
-                                  identifier "editedText"]) << raw
-                   , br
-                   , label << "Description of changes:"
-                   , br
-                   , textfield "logMsg" ! (readonly ++ [value logMsg])
-                   , submit "update" "Save"
-                   , primHtmlChar "nbsp"
-                   , submit "cancel" "Discard"
-                   , primHtmlChar "nbsp"
-                   , input ! [thetype "button", theclass "editButton",
-                              identifier "previewButton",
-                              strAttr "onClick" "updatePreviewPane();",
-                              strAttr "style" "display: none;",
-                              value "Preview" ]
-                   , thediv ! [ identifier "previewpane" ] << noHtml
-                   ]
-  formattedPage defaultPageLayout{
-                  pgPageName = page,
-                  pgMessages = messages,
-                  pgRevision = rev,
-                  pgShowPageTools = False,
-                  pgShowSiteNav = False,
-                  pgMarkupHelp = Just $ markupHelp cfg,
-                  pgSelectedTab = EditTab,
-                  pgScripts = ["preview.js"],
-                  pgTitle = ("Editing " ++ page)
-                  } editForm
+  whenUserHasPermission WriteP (pathForPage page) $ do
+      let getRevisionAndText = catch
+            (do c <- liftIO $ retrieve fs (pathForPage page) rev
+                -- even if pRevision is set, we return revId of latest
+                -- saved version (because we're doing a revert and
+                -- we don't want gitit to merge the changes with the
+                -- latest version)
+                r <- liftIO $ latest fs (pathForPage page) -- >>= revision fs
+                return (Just r, c))
+            (\e -> if e == NotFound
+                      then return (Nothing, "")
+                      else throwIO e)
+      (mbRev, raw) <- case pEditedText params of
+                             Nothing -> liftIO getRevisionAndText
+                             Just t  -> let r = if null (pSHA1 params)
+                                                   then Nothing
+                                                   else Just (pSHA1 params)
+                                        in return (r, t)
+      let messages = pMessages params
+      let logMsg = pLogMsg params
+      let sha1Box = case mbRev of
+                     Just r  -> textfield "sha1" ! [thestyle "display: none",
+                                                    value r]
+                     Nothing -> noHtml
+      let readonly = if isJust (pRevision params)
+                        -- disable editing of text box if it's a revert
+                        then [strAttr "readonly" "yes",
+                              strAttr "style" "color: gray"]
+                        else []
+      base' <- getWikiBase
+      cfg <- getConfig
+      let editForm = gui (base' ++ urlForPage page) ! [identifier "editform"] <<
+                       [ sha1Box
+                       , textarea ! (readonly ++ [cols "80", name "editedText",
+                                      identifier "editedText"]) << raw
+                       , br
+                       , label << "Description of changes:"
+                       , br
+                       , textfield "logMsg" ! (readonly ++ [value logMsg])
+                       , submit "update" "Save"
+                       , primHtmlChar "nbsp"
+                       , submit "cancel" "Discard"
+                       , primHtmlChar "nbsp"
+                       , input ! [thetype "button", theclass "editButton",
+                                  identifier "previewButton",
+                                  strAttr "onClick" "updatePreviewPane();",
+                                  strAttr "style" "display: none;",
+                                  value "Preview" ]
+                       , thediv ! [ identifier "previewpane" ] << noHtml
+                       ]
+      formattedPage defaultPageLayout{
+                      pgPageName = page,
+                      pgMessages = messages,
+                      pgRevision = rev,
+                      pgShowPageTools = False,
+                      pgShowSiteNav = False,
+                      pgMarkupHelp = Just $ markupHelp cfg,
+                      pgSelectedTab = EditTab,
+                      pgScripts = ["preview.js"],
+                      pgTitle = ("Editing " ++ page)
+                      } editForm
 
 confirmDelete :: Handler
 confirmDelete = do
@@ -578,20 +590,21 @@ confirmDelete = do
 deletePage :: Handler
 deletePage = withData $ \(params :: Params) -> do
   page <- getPage
-  let file = pFileToDelete params
-  mbUser <- getLoggedInUser
-  (user, email) <- case mbUser of
-                        Nothing -> fail "User must be logged in to delete."
-                        Just u  -> return (uUsername u, uEmail u)
-  let author = Author user email
-  let descrip = "Deleted using web interface."
-  base' <- getWikiBase
-  if pConfirm params && (file == page || file == page <.> "page") 
-     then do
-       fs <- getFileStore
-       liftIO $ delete fs file author descrip
-       seeOther (base' ++ "/") $ toResponse $ p << "File deleted"
-     else seeOther (base' ++ urlForPage page) $ toResponse $ p << "Not deleted"
+  whenUserHasPermission DeleteP (pathForPage page) $ do
+      let file = pFileToDelete params
+      mbUser <- getLoggedInUser
+      (user, email) <- case mbUser of
+                            Nothing -> fail "User must be logged in to delete."
+                            Just u  -> return (uUsername u, uEmail u)
+      let author = Author user email
+      let descrip = "Deleted using web interface."
+      base' <- getWikiBase
+      if pConfirm params && (file == page || file == page <.> "page") 
+         then do
+           fs <- getFileStore
+           liftIO $ delete fs file author descrip
+           seeOther (base' ++ "/") $ toResponse $ p << "File deleted"
+         else seeOther (base' ++ urlForPage page) $ toResponse $ p << "Not deleted"
 
 updatePage :: Handler
 updatePage = withData $ \(params :: Params) -> do

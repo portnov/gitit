@@ -37,6 +37,7 @@ import Data.DateTime
 import Data.Maybe (fromMaybe)
 import Data.FileStore.Types
 import Network.Gitit.Server
+import Network.Gitit.ACL
 import Text.Pandoc.CharacterReferences (decodeCharacterReferences)
 
 data PageType = Markdown | RST | LaTeX | HTML | AsciiDoc
@@ -67,6 +68,8 @@ data Config = Config {
   authHandler          :: Handler,
   -- | Path of users database
   userFile             :: FilePath,
+  -- | Name of ACL page
+  permissionsPage      :: String,
   -- | Seconds of inactivity before session expires
   sessionTimeout       :: Int,
   -- | Directory containing page templates
@@ -173,6 +176,7 @@ data User = User {
 data GititState = GititState {
   sessions       :: Sessions SessionData,
   users          :: M.Map String User,
+  acl            :: ACL,
   templatesPath  :: FilePath,
   renderPage     :: PageLayout -> Html -> Handler,
   plugins        :: [Plugin]

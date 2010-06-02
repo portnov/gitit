@@ -24,6 +24,8 @@ module Network.Gitit.Framework (
                                , requireUserThat
                                , requireUser
                                , getLoggedInUser
+                               , checkUserPermission
+                               , whenG
                                -- * Combinators to exclude certain actions
                                , unlessNoEdit
                                , unlessNoDelete
@@ -56,12 +58,16 @@ module Network.Gitit.Framework (
                                )
 where
 import Safe
+import Data.List
 import Network.Gitit.Server
 import Network.Gitit.State
 import Network.Gitit.Types
+import Network.Gitit.ACL
 import Data.FileStore
 import Data.Char (toLower)
 import Control.Monad (mzero, liftM, MonadPlus)
+import Control.Monad.Trans
+import qualified Control.Exception as E
 import qualified Data.Map as M
 import Data.ByteString.UTF8 (toString)
 import Data.ByteString.Lazy.UTF8 (fromString)
@@ -74,6 +80,7 @@ import Network.URL (decString, encString)
 import Network.URI (isUnescapedInURI)
 import Happstack.Crypto.Base64 (decode)
 import Network.HTTP (urlEncodeVars)
+import Text.XHtml hiding ( (</>), dir, method, password, rev )
 
 -- | Run the handler if a user is logged in, otherwise redirect
 -- to login page.
@@ -350,3 +357,37 @@ filestoreFromConfig conf =
          Git       -> gitFileStore       $ repositoryPath conf
          Darcs     -> darcsFileStore     $ repositoryPath conf
          Mercurial -> mercurialFileStore $ repositoryPath conf
+
+loadACL :: GititServerPart ACL
+loadACL = do
+  fs <- getFileStore
+  cfg <- getConfig
+  let ppage = pathForPage $ permissionsPage cfg
+  c <- liftIO $ E.try
+        (retrieve fs ppage Nothing :: IO String)
+  case c of
+    Left NotFound -> return []
+    Left _ -> return []
+    Right text -> return $ parseACL text
+
+checkUserPermission :: String -> Permission -> GititServerPart Bool
+checkUserPermission path perm = do
+  let path' = clean path
+  mbUser <- getLoggedInUser
+  acl <- loadACL
+  let (name,groups) = case mbUser of
+                        Just user -> (uUsername user, uGroups user)
+                        Nothing   -> ("anonymous",    [])
+      b = doesUserHavePermission acl name groups path' perm
+  return b
+
+clean :: FilePath -> FilePath
+clean path | ".page" `isSuffixOf` path = take (length path - 5) path
+           | otherwise                 = path
+
+whenG :: GititServerPart Bool -> GititServerPart a -> GititServerPart a
+whenG check action = do
+  b <- check
+  if b
+    then action
+    else mzero

@@ -38,6 +38,7 @@ import Network.Gitit.Users
 gititstate :: IORef GititState
 gititstate = unsafePerformIO $  newIORef  GititState { sessions = undefined
                                                      , users = undefined
+                                                     , acl = []
                                                      , templatesPath = undefined
                                                      , renderPage = undefined
                                                      , plugins = undefined }

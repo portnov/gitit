@@ -8,16 +8,9 @@ import Data.Object.Yaml
 import qualified Data.ByteString.Char8 as BS
 import System.FilePath ((</>))
 
+import Network.Gitit.Types
 import Network.Gitit.Yaml
-
-type Objects = [GititObject]
-data GititObject = GPage String | GDirectory String | AllPages
-  deriving (Eq)
-
-instance Show GititObject where
-  show (GPage s) = s
-  show (GDirectory s) = s ++ "/"
-  show AllPages = "all"
+import Network.Gitit.Page
 
 instance IsYamlScalar GititObject where
   toYamlScalar (GPage s) = toYamlScalar s
@@ -35,15 +28,6 @@ instance IsYamlScalar GititObject where
 (GDirectory d) <#> AllPages = GDirectory d
 AllPages <#> x = x
 
-type Subjects = [Subject]
-data Subject = UserS String | GroupS String | AllUsers
-  deriving (Eq)
-
-instance Show Subject where
-  show (UserS u) = u
-  show (GroupS g) = g ++ "@"
-  show AllUsers = "all"
-
 instance IsYamlScalar Subject where
   toYamlScalar (UserS u) = toYamlScalar u
   toYamlScalar (GroupS g) = toYamlScalar (g ++ "@")
@@ -53,62 +37,6 @@ instance IsYamlScalar Subject where
   fromYamlScalar (fromYamlScalar -> "all") = AllUsers 
   fromYamlScalar s = UserS (fromYamlScalar s)
   
-data PermitSpec = 
-  PermitSpec PermitOp Permissions
-  deriving (Eq)
-
-instance Show PermitSpec where
-  show (PermitSpec op ps) = show op ++ ": " ++ show ps
-
-data Permission = 
-    ReadP
-  | WriteP
-  | CreateP
-  | DeleteP
-  deriving (Eq,Ord)
-
-newtype Permissions = Permissions {permissionsList :: [Permission]}
-  deriving (Eq)
-
-instance Show Permission where
-  show ReadP = "read"
-  show WriteP = "write"
-  show CreateP = "create"
-  show DeleteP = "delete"
-
-allPermited :: Permissions -> Bool
-allPermited (sort . permissionsList -> [ReadP, WriteP, CreateP, DeleteP]) = True
-allPermited _ = False
-
-instance Show Permissions where
-  show p | allPermited p = "all"
-  show lst = intercalate ", " $ map show (permissionsList lst)
-
-data PermitOp = SetPermissions | UnsetPermissions
-  deriving (Eq)
-
-instance Show PermitOp where
-  show SetPermissions = "permit"
-  show UnsetPermissions = "deny"
-
-data Rule =
-    SimpleRule Objects Subjects PermitSpec
-  | Rule Objects Subjects [Rule]
-  deriving (Eq,Show)
-
-data LinearRule = 
-  LR {
-    objects :: Objects,
-    subjects :: Subjects,
-    permitOp :: PermitOp,
-    permissions :: Permissions }
-  deriving (Eq)
-
-type ACL = [LinearRule]
-
-instance Show LinearRule where
-  show (LR os ss po ps) = show os ++ ", " ++ show ss ++ ": " ++ show po ++ " " ++ show ps
-
 rulesToYaml :: [Rule] -> YamlObject
 rulesToYaml rules = Sequence (map ruleToYaml rules)
 
@@ -219,9 +147,10 @@ composeACL lr ps = concatMap (compose' lr) ps
 
 parseACL :: String -> ACL
 parseACL text =
-  case decode (BS.pack text) of
-    Nothing -> []
-    Just y -> linearize $ yamlToRules y
+  let (_, rest) = parseMetadata text
+  in case decode (BS.pack rest) of
+      Nothing -> []
+      Just y -> linearize $ yamlToRules y
 
 doesUserHavePermission :: ACL -> String -> [String] -> String -> Permission -> Bool
 doesUserHavePermission acl userName groups path perm =

@@ -376,7 +376,8 @@ pageToPandoc page' = do
                              , ctxMeta = pageMeta page' }
   let format = pageFormat page'
       text = pageText page'
-  return $ readerFor format (pageLHS page') text
+      meta = pageMeta page'
+  return $ readerFor format (pageLHS page') meta text
 
 -- | Converts contents of page file to Page object.
 contentsToPage :: String -> ContentTransformer Page
@@ -548,17 +549,19 @@ updateLayout f = do
 -- Pandoc and wiki content conversion support
 --
 
-readerFor :: PageType -> Bool -> (String -> Pandoc)
-readerFor pt lhs =
+readerFor :: PageType -> Bool -> [(String,String)] -> (String -> Pandoc)
+readerFor pt lhs meta =
   let defPS = defaultParserState{ stateSanitizeHTML = True
                                 , stateSmart = True
-                                , stateLiterateHaskell = lhs }
+                                , stateLiterateHaskell = lhs
+                                , stateIndentedCodeClasses = maybe [] (\x -> [x]) $ lookup "language" meta}
   in case pt of
        RST      -> readRST defPS
        Markdown -> readMarkdown defPS
        LaTeX    -> readLaTeX defPS
        HTML     -> readHtml defPS
        AsciiDoc -> readAsciidoc defPS
+       Source   -> readSource defPS
 
 wikiLinksTransform :: Pandoc -> PluginM Pandoc
 wikiLinksTransform = return . processWith convertWikiLinks

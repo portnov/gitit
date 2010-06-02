@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TypeSynonymInstances, ViewPatterns #-}
 {-
 Copyright (C) 2009 John MacFarlane <jgm@berkeley.edu>,
 Anton van Straaten <anton@appsolutions.com>
@@ -37,10 +37,10 @@ import Data.DateTime
 import Data.Maybe (fromMaybe)
 import Data.FileStore.Types
 import Network.Gitit.Server
-import Network.Gitit.ACL
 import Text.Pandoc.CharacterReferences (decodeCharacterReferences)
+import Data.List
 
-data PageType = Markdown | RST | LaTeX | HTML | AsciiDoc
+data PageType = Markdown | RST | LaTeX | HTML | AsciiDoc | Source
                 deriving (Read, Show, Eq)
 
 data FileStoreType = Git | Darcs | Mercurial deriving Show
@@ -378,3 +378,81 @@ data WikiState = WikiState {
 type GititServerPart = ServerPartT (ReaderT WikiState IO)
 
 type Handler = GititServerPart Response
+
+-----------------------------
+-- * ACL types
+
+type Objects = [GititObject]
+data GititObject = GPage String | GDirectory String | AllPages
+  deriving (Eq)
+
+type Subjects = [Subject]
+data Subject = UserS String | GroupS String | AllUsers
+  deriving (Eq)
+
+data PermitSpec = 
+  PermitSpec PermitOp Permissions
+  deriving (Eq)
+
+data Permission = 
+    ReadP
+  | WriteP
+  | CreateP
+  | DeleteP
+  deriving (Eq,Ord)
+
+newtype Permissions = Permissions {permissionsList :: [Permission]}
+  deriving (Eq)
+
+data PermitOp = SetPermissions | UnsetPermissions
+  deriving (Eq)
+
+data Rule =
+    SimpleRule Objects Subjects PermitSpec
+  | Rule Objects Subjects [Rule]
+  deriving (Eq,Show)
+
+data LinearRule = 
+  LR {
+    objects :: Objects,
+    subjects :: Subjects,
+    permitOp :: PermitOp,
+    permissions :: Permissions }
+  deriving (Eq)
+
+type ACL = [LinearRule]
+
+instance Show Subject where
+  show (UserS u) = u
+  show (GroupS g) = g ++ "@"
+  show AllUsers = "all"
+
+instance Show PermitSpec where
+  show (PermitSpec op ps) = show op ++ ": " ++ show ps
+
+instance Show Permission where
+  show ReadP = "read"
+  show WriteP = "write"
+  show CreateP = "create"
+  show DeleteP = "delete"
+
+allPermited :: Permissions -> Bool
+allPermited (sort . permissionsList -> [ReadP, WriteP, CreateP, DeleteP]) = True
+allPermited _ = False
+
+instance Show Permissions where
+  show p | allPermited p = "all"
+  show lst = intercalate ", " $ map show (permissionsList lst)
+
+instance Show PermitOp where
+  show SetPermissions = "permit"
+  show UnsetPermissions = "deny"
+
+instance Show LinearRule where
+  show (LR os ss po ps) = show os ++ ", " ++ show ss ++ ": " ++ show po ++ " " ++ show ps
+
+instance Show GititObject where
+  show (GPage s) = s
+  show (GDirectory s) = s ++ "/"
+  show AllPages = "all"
+

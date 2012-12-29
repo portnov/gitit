@@ -52,6 +52,8 @@ module Network.Gitit.Framework (
                                , getMimeTypeForExtension
                                , validate
                                , filestoreFromConfig
+                               , splitOn
+                               , mapDirs
                                )
 where
 import Safe
@@ -73,6 +75,10 @@ import Network.URL (decString, encString)
 import Network.URI (isUnescapedInURI)
 import Data.ByteString.Base64 (decodeLenient)
 import Network.HTTP (urlEncodeVars)
+
+mapDirs :: (ServerMonad m, MonadPlus m) => String -> [m a] -> [m a]
+mapDirs "" = id
+mapDirs str = map (dirs str)
 
 -- | Require a logged in user if the authentication level demands it.
 -- Run the handler if a user is logged in, otherwise redirect

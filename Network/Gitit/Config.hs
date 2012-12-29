@@ -148,7 +148,7 @@ extractConfig cp = do
                                        _         -> ForModify
 
         , authHandler          = case authMethod of
-                                      "form"     -> msum formAuthHandlers
+                                      "form"     -> msum (formAuthHandlers cfBaseUrl)
                                       "http"     -> msum httpAuthHandlers
                                       "rpx"      -> msum rpxAuthHandlers
                                       _          -> mzero

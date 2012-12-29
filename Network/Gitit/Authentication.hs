@@ -403,8 +403,8 @@ registerUserForm = registerForm >>=
                     pgTitle = "Register for an account"
                     }
 
-formAuthHandlers :: [Handler]
-formAuthHandlers =
+formAuthHandlers :: String -> [Handler]
+formAuthHandlers base = mapDirs base $
   [ dir "_register"  $ method GET >> registerUserForm
   , dir "_register"  $ method POST >> withData registerUser
   , dir "_login"     $ method GET  >> loginUserForm

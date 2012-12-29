@@ -139,10 +139,10 @@ wiki conf = do
   -- if file not found in staticDir, we check also in the data/static
   -- directory, which contains defaults
   let staticHandler = withExpiresHeaders $
-        serveDirectory' static `mplus` serveDirectory' defaultStatic
+        serveDirectory' (baseUrl conf) static `mplus` serveDirectory' (baseUrl conf) defaultStatic
   let debugHandler' = msum [debugHandler | debugMode conf]
   let handlers = debugHandler' `mplus` authHandler conf `mplus`
-                 authenticate ForRead (msum wikiHandlers)
+                 authenticate ForRead (msum $ wikiHandlers $ baseUrl conf)
   let fs = filestoreFromConfig conf
   let ws = WikiState { wikiConfig = conf, wikiFileStore = fs }
   if compressResponses conf
@@ -152,8 +152,8 @@ wiki conf = do
 
 -- | Like 'serveDirectory', but if file is not found, fail instead of
 -- returning a 404 error.
-serveDirectory' :: FilePath -> ServerPart Response
-serveDirectory' p = do
+serveDirectory' :: String -> FilePath -> ServerPart Response
+serveDirectory' base p = dirs base $ do
   rq <- askRq
   resp' <- serveDirectory EnableBrowsing [] p
   if rsCode resp' == 404 || lastNote "fileServeStrict'" (rqUri rq) == '/'
@@ -164,8 +164,8 @@ serveDirectory' p = do
             Just ct | B.pack "text/" `B.isPrefixOf` ct -> return resp'
             _ -> ignoreFilters >> return resp'
 
-wikiHandlers :: [Handler]
-wikiHandlers =
+wikiHandlers :: String -> [Handler]
+wikiHandlers bUrl = mapDirs bUrl $
   [ -- redirect /wiki -> /wiki/ when gitit is being served at /wiki
     -- so that relative wikilinks on the page will work properly:
     guardBareBase >> getWikiBase >>= \b -> movedPermanently (b ++ "/") (toResponse ())
